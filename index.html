@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Анализатор релевантности 2.0 (Исправленный)</title>
+    <title>Анализатор релевантности 2.1</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
@@ -427,14 +427,32 @@
             margin: 20px 0;
             border-left: 4px solid #38a169;
         }
+
+        .valve-code-info {
+            background: #e6f3ff;
+            border: 1px solid #4facfe;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 0.9rem;
+        }
+
+        .valve-code-match {
+            background: #e6ffe6;
+            border-left: 4px solid #38a169;
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin: 5px 0;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <div class="version-badge">Версия 2.0 (Исправленная)</div>
+            <div class="version-badge">Версия 2.1 (с таблицей фигур)</div>
             <h1>🔍 Анализатор релевантности заголовков</h1>
-            <p>Многокатегорийный анализ с классификацией страниц и исправленными алгоритмами</p>
+            <p>Многокатегорийный анализ с поддержкой таблицы фигур задвижек</p>
         </div>
         
         <div class="upload-section">
@@ -446,6 +464,22 @@
                         <div class="category-option" data-category="krany">Краны</div>
                         <div class="category-option" data-category="zadvijki">Задвижки</div>
                         <div class="category-option" data-category="auto">Авто</div>
+                    </div>
+                    <div class="valve-code-info" style="display: none;">
+                        <strong>📋 Анализ таблицы фигур задвижек</strong><br>
+                        При выборе категории "Задвижки" учитываются технические коды согласно ГОСТ:<br>
+                        • Тип изделия (30, 31)<br>
+                        • Материал корпуса (лс, с, нж, ч, бр)<br>
+                        • Конструктивный номер<br>
+                        • Дополнительные обозначения (ХЛ, ГАЗ, МЗВ)
+                    </div>
+                    <div id="craneTypeInfo" class="valve-code-info" style="display: none;">
+                        <strong>🔧 Многофакторный анализ кранов</strong><br>
+                        При выборе категории "Краны" анализируются:<br>
+                        • Тип крана (шаровой, пробковый, игольчатый) - 4 балла<br>
+                        • Конструкция (полнопроходной, трехходовой) - 2 балла<br>
+                        • Управление (ручной, электропривод, пневмопривод) - 1 балл<br>
+                        • Технические параметры (ДУ, РУ, материал, присоединение)
                     </div>
                 </div>
                 
@@ -520,7 +554,7 @@
     </div>
 
     <script>
-        // ИСПРАВЛЕННАЯ И ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
+        // ДОРАБОТАННАЯ ВЕРСИЯ С ПОДДЕРЖКОЙ ТАБЛИЦЫ ФИГУР ЗАДВИЖЕК
         
         // Конфигурация технических сокращений
         const TECHNICAL_ABBREVIATIONS = {
@@ -536,6 +570,31 @@
             'кр': 'клапан регулирующий',
             'зк': 'задвижка клиновая',
             'зш': 'задвижка шиберная'
+        };
+
+        // Конфигурация для расшифровки таблицы фигур задвижек
+        const VALVE_CODES = {
+            // Типы изделий
+            types: {
+                '30': 'задвижка общего назначения',
+                '31': 'задвижка специальная'
+            },
+            // Материалы корпуса
+            materials: {
+                'лс': 'литая сталь',
+                'с': 'сталь',
+                'нж': 'нержавеющая сталь',
+                'лснж': 'литая нержавеющая сталь',
+                'ч': 'чугун',
+                'бр': 'бронза'
+            },
+            // Дополнительные обозначения
+            modifiers: {
+                'хл': 'холодный климат',
+                'газ': 'для газа',
+                'мзв': 'выдвижной шпиндель',
+                'мзвг': 'выдвижной шпиндель для газа'
+            }
         };
 
         // Конфигурация категорий
@@ -565,9 +624,11 @@
                 productTypes: ['задвижка', 'клиновая', 'шиберная', 'дисковая'],
                 synonymGroups: [
                     ['шиберная', 'ножевая'],
-                    ['выдвижной', 'выдвижной шпиндель']
+                    ['выдвижной', 'выдвижной шпиндель'],
+                    ['клиновая', 'клин']
                 ],
-                technicalCodes: ['зк', 'зш']
+                technicalCodes: ['зк', 'зш'],
+                useValveCodes: true // Флаг для использования таблицы фигур
             },
             auto: {
                 name: 'Авто-определение',
@@ -578,7 +639,7 @@
         };
 
         let currentData = null;
-        let currentConfig = CONFIG.krany; // По умолчанию краны, так как файл с кранами
+        let currentConfig = CONFIG.klapany;
         let processLimit = 1000;
 
         // Инициализация
@@ -594,6 +655,21 @@
                     this.classList.add('active');
                     const category = this.dataset.category;
                     currentConfig = CONFIG[category];
+                    
+                    // Показать информацию о специальном анализе
+                    const valveInfo = document.getElementById('valveCodeInfo');
+                    const craneInfo = document.getElementById('craneTypeInfo');
+                    
+                    // Скрыть все информационные блоки
+                    if (valveInfo) valveInfo.style.display = 'none';
+                    if (craneInfo) craneInfo.style.display = 'none';
+                    
+                    if (category === 'zadvijki') {
+                        if (valveInfo) valveInfo.style.display = 'block';
+                    } else if (category === 'krany') {
+                        if (craneInfo) craneInfo.style.display = 'block';
+                    }
+                    
                     showMessage(`Выбрана категория: ${currentConfig.name}`, 'success');
                 });
             });
@@ -625,7 +701,6 @@
             const className = type === 'error' ? 'error-message' : 'success-message';
             messageArea.innerHTML = `<div class="${className}">${text}</div>`;
             
-            // Автоматически скрыть сообщение через 5 секунд
             setTimeout(() => {
                 messageArea.innerHTML = '';
             }, 5000);
@@ -654,7 +729,6 @@
                         throw new Error('Файл должен содержать минимум 2 строки (заголовки + данные)');
                     }
                     
-                    // Проверка структуры данных
                     const headers = jsonData[0];
                     if (!headers || headers.length < 4) {
                         throw new Error('Файл должен содержать минимум 4 колонки: запрос, кампания, url, title');
@@ -753,23 +827,18 @@
             return classifications;
         }
 
-        // ИСПРАВЛЕННАЯ ФУНКЦИЯ КЛАССИФИКАЦИИ
         function classifyPage(url, title) {
-            // Улучшенная логика классификации товарных страниц
             const titleLower = title.toLowerCase();
             
-            // Признаки товарной страницы:
             const hasDetailedSpecs = /ду\s*\d+|dn\s*\d+|ру\s*\d+|pn\s*\d+|\d+\s*мм|\d+"|1\/2|3\/4/i.test(title);
             const hasModelNumber = /[A-Z0-9]{2,}[-\(\)A-Z0-9]*\d/i.test(title);
             const hasDetailedDescription = title.length > 50;
             const hasTechnicalTerms = /(нержавеющая|латунь|чугун|полнопроходной|фланцевый|муфтовый|резьбовой|привод|рычаг)/i.test(title);
             
-            // Признаки листинга:
             const isCatalogPage = /(каталог|категория|все|подбор|выбор|серия|линейка)/i.test(title);
             const isBrandPage = /^[A-Z\s]+$/i.test(title.trim()) && title.length < 30;
             const isGenericTitle = title.length < 30 && !hasDetailedSpecs;
             
-            // Логика принятия решения
             if (isCatalogPage || isBrandPage || isGenericTitle) {
                 return 'listings';
             }
@@ -778,7 +847,6 @@
                 return 'products';
             }
             
-            // По умолчанию относим к листингам
             return 'listings';
         }
 
@@ -791,7 +859,6 @@
             document.getElementById('previewSection').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
-            // Используем setTimeout для асинхронности
             setTimeout(() => {
                 try {
                     analyzeData(currentData);
@@ -809,10 +876,8 @@
                 const sampleSize = Math.min(rows.length, processLimit);
                 const sample = rows.slice(0, sampleSize);
 
-                // Анализ характеристик
                 const characteristicsAnalysis = analyzeCharacteristics(sample);
 
-                // Результаты анализа
                 const results = {
                     total: sampleSize,
                     products: [],
@@ -820,7 +885,6 @@
                     characteristics: characteristicsAnalysis
                 };
 
-                // Классификация и анализ релевантности
                 sample.forEach(row => {
                     const query = row[0] || '';
                     const url = row[2] || '';
@@ -845,10 +909,83 @@
             }
         }
 
+        // НОВАЯ ФУНКЦИЯ: Парсинг технического кода задвижки
+        function parseValveCode(text) {
+            // Удаляем все в скобках и лишние пробелы
+            const cleanText = text.replace(/\([^)]*\)/g, '').trim().toLowerCase();
+            
+            // Ищем паттерн: цифры + буквы + цифры + возможные дополнения
+            const valvePattern = /(\d{2,3})([а-я]+)(\d+)([а-я]*)/g;
+            const matches = [...cleanText.matchAll(valvePattern)];
+            
+            const codes = [];
+            
+            matches.forEach(match => {
+                const [fullMatch, typeCode, materialCode, constructiveNumber, modifiers] = match;
+                
+                const parsed = {
+                    original: fullMatch,
+                    type: typeCode,
+                    material: materialCode,
+                    constructiveNumber: constructiveNumber,
+                    modifiers: modifiers || '',
+                    normalized: `${typeCode}${materialCode}${constructiveNumber}${modifiers}`
+                };
+                
+                codes.push(parsed);
+            });
+            
+            return codes;
+        }
+
+        // НОВАЯ ФУНКЦИЯ: Сравнение технических кодов задвижек
+        function compareValveCodes(queryCode, titleCode) {
+            const queryParsed = parseValveCode(queryCode);
+            const titleParsed = parseValveCode(titleCode);
+            
+            if (queryParsed.length === 0 || titleParsed.length === 0) {
+                return { match: false, details: 'Не найдены технические коды' };
+            }
+            
+            // Ищем совпадения между любыми найденными кодами
+            for (let qCode of queryParsed) {
+                for (let tCode of titleParsed) {
+                    // Проверяем точное совпадение нормализованного кода
+                    if (qCode.normalized === tCode.normalized) {
+                        return {
+                            match: true,
+                            details: `Точное совпадение: ${qCode.original}`,
+                            queryCode: qCode,
+                            titleCode: tCode
+                        };
+                    }
+                    
+                    // Проверяем совпадение основных параметров (тип + материал + конструктив)
+                    if (qCode.type === tCode.type && 
+                        qCode.material === tCode.material && 
+                        qCode.constructiveNumber === tCode.constructiveNumber) {
+                        return {
+                            match: true,
+                            details: `Совпадение основных параметров: ${qCode.type}${qCode.material}${qCode.constructiveNumber}`,
+                            queryCode: qCode,
+                            titleCode: tCode
+                        };
+                    }
+                }
+            }
+            
+            return {
+                match: false,
+                details: `Несовпадение кодов: запрос ${queryParsed.map(c => c.original).join(', ')}, заголовок ${titleParsed.map(c => c.original).join(', ')}`,
+                queryParsed,
+                titleParsed
+            };
+        }
+
         function analyzeCharacteristics(sample) {
             const characteristics = {};
             
-            const patterns = [
+            let patterns = [
                 { pattern: /ду\s*(\d+)/gi, name: 'Диаметр ДУ', category: 'size' },
                 { pattern: /dn\s*(\d+)/gi, name: 'Диаметр DN', category: 'size' },
                 { pattern: /ру\s*(\d+)/gi, name: 'Давление РУ', category: 'pressure' },
@@ -859,6 +996,28 @@
                 { pattern: /муфтов/gi, name: 'Муфтовое соединение', category: 'connection' },
                 { pattern: /фланц/gi, name: 'Фланцевое соединение', category: 'connection' }
             ];
+
+            // Добавляем специальные паттерны для задвижек
+            if (currentConfig.useValveCodes) {
+                patterns.push(
+                    { pattern: /30[а-я]+\d+/gi, name: 'Код задвижки тип 30', category: 'valve_code' },
+                    { pattern: /31[а-я]+\d+/gi, name: 'Код задвижки тип 31', category: 'valve_code' },
+                    { pattern: /клинов/gi, name: 'Клиновая задвижка', category: 'valve_type' },
+                    { pattern: /шибер/gi, name: 'Шиберная задвижка', category: 'valve_type' }
+                );
+            }
+
+            // Добавляем специальные паттерны для кранов
+            if (currentConfig.name === 'Краны') {
+                patterns.push(
+                    { pattern: /шаров/gi, name: 'Шаровой кран', category: 'crane_type' },
+                    { pattern: /полнопроходн/gi, name: 'Полнопроходной', category: 'crane_design' },
+                    { pattern: /трехходов/gi, name: 'Трехходовой', category: 'crane_design' },
+                    { pattern: /электропривод/gi, name: 'Электропривод', category: 'crane_control' },
+                    { pattern: /пневмопривод/gi, name: 'Пневмопривод', category: 'crane_control' },
+                    { pattern: /рычаг/gi, name: 'Ручной (рычаг)', category: 'crane_control' }
+                );
+            }
             
             sample.forEach(row => {
                 if (!row || !row[0]) return;
@@ -882,7 +1041,6 @@
                 });
             });
 
-            // Вычисление процентов
             Object.keys(characteristics).forEach(key => {
                 characteristics[key].percentage = Math.round(
                     (characteristics[key].count / characteristics[key].total) * 100
@@ -892,7 +1050,200 @@
             return characteristics;
         }
 
+        // НОВАЯ ФУНКЦИЯ: Извлечение типов кранов
+        function extractValveTypes(text) {
+            const types = [];
+            const textLower = text.toLowerCase();
+            
+            // Основные типы кранов
+            if (/шаров/i.test(text)) types.push('шаровой');
+            if (/пробков/i.test(text)) types.push('пробковый');
+            if (/игольчат/i.test(text)) types.push('игольчатый');
+            if (/газов/i.test(text)) types.push('газовый');
+            
+            // Конструктивные особенности
+            if (/полнопроходн/i.test(text) || /полный проход/i.test(text)) types.push('полнопроходной');
+            if (/стандартнопроходн/i.test(text) || /стандартный проход/i.test(text)) types.push('стандартнопроходной');
+            if (/трехходов/i.test(text) || /3-?х?\s*ходов/i.test(text)) types.push('трехходовой');
+            if (/четырехходов/i.test(text) || /4-?х?\s*ходов/i.test(text)) types.push('четырехходовой');
+            
+            // Типы управления
+            if (/ручн/i.test(text) || /штурвал/i.test(text) || /рычаг/i.test(text)) types.push('ручной');
+            if (/электропривод/i.test(text) || /электро/i.test(text)) types.push('с электроприводом');
+            if (/пневмопривод/i.test(text) || /пневмо/i.test(text)) types.push('с пневмоприводом');
+            
+            return [...new Set(types)];
+        }
+
+        // НОВАЯ ФУНКЦИЯ: Сравнение типов кранов
+        function compareValveTypes(queryTypes, titleTypes) {
+            const compatibility = {
+                score: 0,
+                maxScore: 0,
+                details: []
+            };
+
+            if (queryTypes.length === 0) return compatibility;
+
+            // Основные типы кранов (высокий вес: 4 балла)
+            const mainTypes = ['шаровой', 'пробковый', 'игольчатый', 'газовый'];
+            const queryMainTypes = queryTypes.filter(t => mainTypes.includes(t));
+            const titleMainTypes = titleTypes.filter(t => mainTypes.includes(t));
+            
+            if (queryMainTypes.length > 0) {
+                compatibility.maxScore += 4;
+                const mainTypeMatch = queryMainTypes.some(qt => titleMainTypes.includes(qt));
+                if (mainTypeMatch) {
+                    compatibility.score += 4;
+                    compatibility.details.push(`✅ Тип крана: ${queryMainTypes.join(', ')} совпадает с ${titleMainTypes.join(', ')}`);
+                } else if (titleMainTypes.length > 0) {
+                    compatibility.details.push(`❌ Тип крана: ${queryMainTypes.join(', ')} ≠ ${titleMainTypes.join(', ')}`);
+                }
+            }
+
+            // Конструктивные особенности (средний вес: 2 балла)
+            const designTypes = ['полнопроходной', 'стандартнопроходной', 'трехходовой', 'четырехходовой'];
+            const queryDesignTypes = queryTypes.filter(t => designTypes.includes(t));
+            const titleDesignTypes = titleTypes.filter(t => designTypes.includes(t));
+            
+            if (queryDesignTypes.length > 0) {
+                compatibility.maxScore += 2;
+                const designMatch = queryDesignTypes.some(qt => titleDesignTypes.includes(qt));
+                if (designMatch) {
+                    compatibility.score += 2;
+                    compatibility.details.push(`✅ Конструкция: ${queryDesignTypes.join(', ')} совпадает`);
+                } else if (titleDesignTypes.length > 0) {
+                    compatibility.details.push(`❌ Конструкция: ${queryDesignTypes.join(', ')} ≠ ${titleDesignTypes.join(', ')}`);
+                }
+            }
+
+            // Типы управления (низкий вес: 1 балл)
+            const controlTypes = ['ручной', 'с электроприводом', 'с пневмоприводом'];
+            const queryControlTypes = queryTypes.filter(t => controlTypes.includes(t));
+            const titleControlTypes = titleTypes.filter(t => controlTypes.includes(t));
+            
+            if (queryControlTypes.length > 0) {
+                compatibility.maxScore += 1;
+                const controlMatch = queryControlTypes.some(qt => titleControlTypes.includes(qt));
+                if (controlMatch) {
+                    compatibility.score += 1;
+                    compatibility.details.push(`✅ Управление: ${queryControlTypes.join(', ')} совпадает`);
+                } else if (titleControlTypes.length > 0) {
+                    compatibility.details.push(`❌ Управление: ${queryControlTypes.join(', ')} ≠ ${titleControlTypes.join(', ')}`);
+                }
+            }
+
+            return compatibility;
+        }
+
+        // НОВАЯ ФУНКЦИЯ: Анализ релевантности для кранов
+        function analyzeCraneRelevance(query, title, pageType) {
+            const queryLower = query.toLowerCase();
+            const titleLower = title.toLowerCase();
+            
+            // Проверяем наличие слова "кран" в запросе или заголовке
+            const hasCraneInQuery = /кран/i.test(query);
+            const hasCraneInTitle = /кран/i.test(title);
+            
+            if (!hasCraneInQuery && !hasCraneInTitle) {
+                return { relevant: false, reason: 'Не найдено упоминание "кран"' };
+            }
+
+            // 1. Извлекаем технические параметры
+            const queryParams = extractTechnicalParams(query);
+            const titleParams = extractTechnicalParams(title);
+            const paramCompatibility = compareTechnicalParams(queryParams, titleParams);
+
+            // 2. Извлекаем и сравниваем типы кранов
+            const queryTypes = extractValveTypes(query);
+            const titleTypes = extractValveTypes(title);
+            const typeCompatibility = compareValveTypes(queryTypes, titleTypes);
+
+            // 3. Объединяем оценки параметров и типов
+            const totalScore = paramCompatibility.score + typeCompatibility.score;
+            const totalMaxScore = paramCompatibility.maxScore + typeCompatibility.maxScore;
+            const allDetails = [...paramCompatibility.details, ...typeCompatibility.details];
+
+            // 4. Логика принятия решения
+            if (totalMaxScore === 0) {
+                // Нет параметров для сравнения - базовая проверка
+                const queryInfo = extractInfo(query);
+                const titleInfo = extractInfo(title);
+                
+                if (queryInfo.types.length > 0 && titleInfo.types.length > 0) {
+                    if (areTypesCompatible(queryInfo.types, titleInfo.types)) {
+                        return { 
+                            relevant: true, 
+                            reason: 'Соответствие базовых типов кранов',
+                            paramDetails: { score: 0, maxScore: 0, details: allDetails },
+                            typeDetails: typeCompatibility
+                        };
+                    }
+                }
+                
+                if (hasCraneInQuery && hasCraneInTitle) {
+                    return { 
+                        relevant: true, 
+                        reason: 'Минимальное соответствие: упоминание крана без детальных параметров',
+                        paramDetails: paramCompatibility,
+                        typeDetails: typeCompatibility
+                    };
+                }
+                
+                return { 
+                    relevant: false, 
+                    reason: 'Недостаточно данных для анализа соответствия',
+                    paramDetails: paramCompatibility,
+                    typeDetails: typeCompatibility
+                };
+            }
+
+            const compatibilityPercent = (totalScore / totalMaxScore) * 100;
+            
+            if (compatibilityPercent >= 90) {
+                return { 
+                    relevant: true, 
+                    reason: `Отличное соответствие (${totalScore}/${totalMaxScore} - ${compatibilityPercent.toFixed(1)}%)`,
+                    paramDetails: paramCompatibility,
+                    typeDetails: typeCompatibility
+                };
+            } else if (compatibilityPercent >= 70) {
+                return { 
+                    relevant: true, 
+                    reason: `Хорошее соответствие (${totalScore}/${totalMaxScore} - ${compatibilityPercent.toFixed(1)}%)`,
+                    paramDetails: paramCompatibility,
+                    typeDetails: typeCompatibility
+                };
+            } else if (compatibilityPercent >= 50) {
+                return { 
+                    relevant: true, 
+                    reason: `Частичное соответствие (${totalScore}/${totalMaxScore} - ${compatibilityPercent.toFixed(1)}%)`,
+                    paramDetails: paramCompatibility,
+                    typeDetails: typeCompatibility
+                };
+            } else {
+                return { 
+                    relevant: false, 
+                    reason: `Низкое соответствие (${totalScore}/${totalMaxScore} - ${compatibilityPercent.toFixed(1)}%)`,
+                    paramDetails: paramCompatibility,
+                    typeDetails: typeCompatibility
+                };
+            }
+        }
+
+        // ОБНОВЛЕННАЯ ФУНКЦИЯ: Анализ релевантности с поддержкой всех категорий
         function analyzeRelevance(query, title, pageType) {
+            // Специальная логика для задвижек
+            if (currentConfig.useValveCodes) {
+                return analyzeValveRelevance(query, title, pageType);
+            }
+            
+            // Специальная логика для кранов
+            if (currentConfig.name === 'Краны') {
+                return analyzeCraneRelevance(query, title, pageType);
+            }
+            
+            // Стандартная логика для клапанов и других категорий
             const queryInfo = extractInfo(query);
             const titleInfo = extractInfo(title);
             
@@ -911,18 +1262,219 @@
             return { relevant: true, reason: 'Соответствует критериям' };
         }
 
+        // НОВАЯ ФУНКЦИЯ: Извлечение технических параметров
+        function extractTechnicalParams(text) {
+            const params = {
+                diameters: [],
+                pressures: [],
+                materials: [],
+                connections: [],
+                temperatures: []
+            };
+
+            // Диаметры
+            const duMatches = [...text.matchAll(/ду\s*(\d+)/gi)];
+            const dnMatches = [...text.matchAll(/dn\s*(\d+)/gi)];
+            params.diameters = [...duMatches, ...dnMatches].map(m => parseInt(m[1]));
+
+            // Давления
+            const ruMatches = [...text.matchAll(/ру\s*(\d+)/gi)];
+            const pnMatches = [...text.matchAll(/pn\s*(\d+)/gi)];
+            params.pressures = [...ruMatches, ...pnMatches].map(m => parseInt(m[1]));
+
+            // Материалы
+            if (/нержав/i.test(text)) params.materials.push('нержавеющая');
+            if (/латун/i.test(text)) params.materials.push('латунь');
+            if (/чугун/i.test(text)) params.materials.push('чугун');
+            if (/сталь/i.test(text) && !/нержав/i.test(text)) params.materials.push('сталь');
+
+            // Присоединения
+            if (/фланц/i.test(text)) params.connections.push('фланцевое');
+            if (/муфтов/i.test(text)) params.connections.push('муфтовое');
+            if (/резьбов/i.test(text)) params.connections.push('резьбовое');
+
+            return params;
+        }
+
+        // НОВАЯ ФУНКЦИЯ: Сравнение технических параметров
+        function compareTechnicalParams(queryParams, titleParams) {
+            const compatibility = {
+                score: 0,
+                maxScore: 0,
+                details: []
+            };
+
+            // Сравнение диаметров (вес: 3 балла)
+            if (queryParams.diameters.length > 0) {
+                compatibility.maxScore += 3;
+                const diameterMatch = queryParams.diameters.some(qd => 
+                    titleParams.diameters.some(td => Math.abs(qd - td) <= 5) // ±5мм допуск
+                );
+                if (diameterMatch) {
+                    compatibility.score += 3;
+                    compatibility.details.push(`✅ Диаметр: ${queryParams.diameters.join(', ')} ≈ ${titleParams.diameters.join(', ')}`);
+                } else if (titleParams.diameters.length > 0) {
+                    compatibility.details.push(`❌ Диаметр: ${queryParams.diameters.join(', ')} ≠ ${titleParams.diameters.join(', ')}`);
+                }
+            }
+
+            // Сравнение давлений (вес: 2 балла)
+            if (queryParams.pressures.length > 0) {
+                compatibility.maxScore += 2;
+                const pressureMatch = queryParams.pressures.some(qp => 
+                    titleParams.pressures.some(tp => qp === tp)
+                );
+                if (pressureMatch) {
+                    compatibility.score += 2;
+                    compatibility.details.push(`✅ Давление: ${queryParams.pressures.join(', ')} = ${titleParams.pressures.join(', ')}`);
+                } else if (titleParams.pressures.length > 0) {
+                    compatibility.details.push(`❌ Давление: ${queryParams.pressures.join(', ')} ≠ ${titleParams.pressures.join(', ')}`);
+                }
+            }
+
+            // Сравнение материалов (вес: 2 балла)
+            if (queryParams.materials.length > 0) {
+                compatibility.maxScore += 2;
+                const materialMatch = queryParams.materials.some(qm => 
+                    titleParams.materials.includes(qm)
+                );
+                if (materialMatch) {
+                    compatibility.score += 2;
+                    compatibility.details.push(`✅ Материал: совпадение (${queryParams.materials.join(', ')})`);
+                } else if (titleParams.materials.length > 0) {
+                    compatibility.details.push(`❌ Материал: ${queryParams.materials.join(', ')} ≠ ${titleParams.materials.join(', ')}`);
+                }
+            }
+
+            // Сравнение присоединений (вес: 1 балл)
+            if (queryParams.connections.length > 0) {
+                compatibility.maxScore += 1;
+                const connectionMatch = queryParams.connections.some(qc => 
+                    titleParams.connections.includes(qc)
+                );
+                if (connectionMatch) {
+                    compatibility.score += 1;
+                    compatibility.details.push(`✅ Присоединение: совпадение (${queryParams.connections.join(', ')})`);
+                } else if (titleParams.connections.length > 0) {
+                    compatibility.details.push(`❌ Присоединение: ${queryParams.connections.join(', ')} ≠ ${titleParams.connections.join(', ')}`);
+                }
+            }
+
+            return compatibility;
+        }
+
+        // ОБНОВЛЕННАЯ ФУНКЦИЯ: Анализ релевантности для задвижек
+        function analyzeValveRelevance(query, title, pageType) {
+            const queryLower = query.toLowerCase();
+            const titleLower = title.toLowerCase();
+            
+            // Проверяем наличие слова "задвижка" в запросе или заголовке
+            const hasValveInQuery = /задвижк/i.test(query);
+            const hasValveInTitle = /задвижк/i.test(title);
+            
+            if (!hasValveInQuery && !hasValveInTitle) {
+                return { relevant: false, reason: 'Не найдено упоминание "задвижка"' };
+            }
+            
+            // 1. Проверяем технические коды (высший приоритет)
+            const codeComparison = compareValveCodes(query, title);
+            
+            // 2. Проверяем технические параметры
+            const queryParams = extractTechnicalParams(query);
+            const titleParams = extractTechnicalParams(title);
+            const paramCompatibility = compareTechnicalParams(queryParams, titleParams);
+            
+            // 3. Логика принятия решения
+            if (codeComparison.match) {
+                // Есть совпадение кодов - проверяем параметры для уточнения
+                if (paramCompatibility.maxScore > 0 && paramCompatibility.score === paramCompatibility.maxScore) {
+                    return { 
+                        relevant: true, 
+                        reason: `Полное соответствие: коды + параметры (${paramCompatibility.score}/${paramCompatibility.maxScore})`,
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                } else {
+                    return { 
+                        relevant: true, 
+                        reason: `Совпадение кодов: ${codeComparison.details}`,
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                }
+            }
+            
+            // 4. Если кодов нет, оцениваем по параметрам
+            if (paramCompatibility.maxScore > 0) {
+                const compatibilityPercent = (paramCompatibility.score / paramCompatibility.maxScore) * 100;
+                
+                if (compatibilityPercent >= 80) {
+                    return { 
+                        relevant: true, 
+                        reason: `Высокое соответствие параметров (${paramCompatibility.score}/${paramCompatibility.maxScore})`,
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                } else if (compatibilityPercent >= 50) {
+                    return { 
+                        relevant: true, 
+                        reason: `Частичное соответствие параметров (${paramCompatibility.score}/${paramCompatibility.maxScore})`,
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                } else {
+                    return { 
+                        relevant: false, 
+                        reason: `Низкое соответствие параметров (${paramCompatibility.score}/${paramCompatibility.maxScore})`,
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                }
+            }
+            
+            // 5. Проверяем совпадение типов арматуры
+            const queryInfo = extractInfo(query);
+            const titleInfo = extractInfo(title);
+            
+            if (queryInfo.types.length > 0 && titleInfo.types.length > 0) {
+                if (areTypesCompatible(queryInfo.types, titleInfo.types)) {
+                    return { 
+                        relevant: true, 
+                        reason: 'Совпадение типов задвижек',
+                        codeDetails: codeComparison,
+                        paramDetails: paramCompatibility
+                    };
+                }
+            }
+            
+            // 6. Минимальное соответствие - только упоминание задвижки
+            if (hasValveInQuery && hasValveInTitle) {
+                return { 
+                    relevant: true, 
+                    reason: 'Минимальное соответствие: упоминание задвижки без детальных параметров',
+                    codeDetails: codeComparison,
+                    paramDetails: paramCompatibility
+                };
+            }
+            
+            return { 
+                relevant: false, 
+                reason: `Несоответствие: ${codeComparison.details}`,
+                codeDetails: codeComparison,
+                paramDetails: paramCompatibility
+            };
+        }
+
         function extractInfo(text) {
             const normalized = text.toLowerCase().replace(/[^\wа-я]/g, ' ').replace(/\s+/g, ' ').trim();
             let foundTypes = [];
             
-            // Поиск технических кодов
             for (let [code, expansion] of Object.entries(TECHNICAL_ABBREVIATIONS)) {
                 if (normalized.includes(code)) {
                     foundTypes.push(...expansion.split(' '));
                 }
             }
             
-            // Поиск типов товаров
             if (currentConfig.productTypes) {
                 for (let type of currentConfig.productTypes) {
                     if (normalized.includes(type)) {
@@ -937,12 +1489,10 @@
         function areTypesCompatible(queryTypes, titleTypes) {
             if (!queryTypes.length || !titleTypes.length) return false;
             
-            // Прямое совпадение
             for (let qType of queryTypes) {
                 if (titleTypes.includes(qType)) return true;
             }
             
-            // Проверка синонимов
             if (currentConfig.synonymGroups) {
                 for (let group of currentConfig.synonymGroups) {
                     let queryHas = queryTypes.some(t => group.includes(t));
@@ -954,12 +1504,10 @@
             return false;
         }
 
-        // ИСПРАВЛЕННАЯ ФУНКЦИЯ calculateOverallStats
         function calculateOverallStats(results) {
             const productRelevant = results.products.filter(item => item.relevance.relevant).length;
             const listingRelevant = results.listings.filter(item => item.relevance.relevant).length;
             
-            // Весовые коэффициенты: товары 100%, листинги 50%
             const weightedTotal = results.products.length * 1.0 + results.listings.length * 0.5;
             const weightedRelevant = productRelevant * 1.0 + listingRelevant * 0.5;
             const overallPercentage = weightedTotal > 0 ? (weightedRelevant / weightedTotal * 100).toFixed(1) : 0;
@@ -999,16 +1547,9 @@
                 const listingStats = calculateStats(results.listings);
                 const overallStats = calculateOverallStats(results);
 
-                // Общая статистика
                 displayOverallStats(overallStats);
-                
-                // Таблица сравнения
                 displayComparisonTable(productStats, listingStats);
-                
-                // Характеристики
                 displayCharacteristicsImportance(results.characteristics);
-                
-                // Контент по табам
                 displayTabContent(results, productStats, listingStats);
 
                 showMessage('Анализ завершен успешно!', 'success');
@@ -1108,8 +1649,8 @@
             `).join('');
         }
 
+        // ОБНОВЛЕННАЯ ФУНКЦИЯ: Отображение примеров с полным анализом параметров
         function displayTabContent(results, productStats, listingStats) {
-            // Товарные страницы
             const productsContent = document.getElementById('products-content');
             const productExamples = getExamples(results.products, 5);
             
@@ -1119,6 +1660,24 @@
                     <div class="example-item good">
                         <div class="query"><strong>Запрос:</strong> ${example.query}</div>
                         <div class="title"><strong>Заголовок:</strong> ${example.title}</div>
+                        <div class="reason" style="color: #38a169;"><strong>✅ Причина релевантности:</strong> ${example.relevance.reason}</div>
+                        ${example.relevance.codeDetails ? `
+                            <div class="valve-code-match">
+                                <strong>🔧 Анализ технических кодов:</strong> ${example.relevance.codeDetails.details}
+                            </div>
+                        ` : ''}
+                        ${example.relevance.paramDetails && example.relevance.paramDetails.details.length > 0 ? `
+                            <div class="valve-code-match" style="background: #f0f8ff; border-left-color: #4facfe;">
+                                <strong>📊 Технические параметры (${example.relevance.paramDetails.score}/${example.relevance.paramDetails.maxScore}):</strong><br>
+                                ${example.relevance.paramDetails.details.join('<br>')}
+                            </div>
+                        ` : ''}
+                        ${example.relevance.typeDetails && example.relevance.typeDetails.details.length > 0 ? `
+                            <div class="valve-code-match" style="background: #f0fff0; border-left-color: #38a169;">
+                                <strong>🔧 Типы и конструкция (${example.relevance.typeDetails.score}/${example.relevance.typeDetails.maxScore}):</strong><br>
+                                ${example.relevance.typeDetails.details.join('<br>')}
+                            </div>
+                        ` : ''}
                     </div>
                 `).join('')}
                 
@@ -1127,12 +1686,28 @@
                     <div class="example-item bad">
                         <div class="query"><strong>Запрос:</strong> ${example.query}</div>
                         <div class="title"><strong>Заголовок:</strong> ${example.title}</div>
-                        <div class="reason"><strong>Проблема:</strong> ${example.relevance.reason}</div>
+                        <div class="reason"><strong>❌ Проблема:</strong> ${example.relevance.reason}</div>
+                        ${example.relevance.codeDetails ? `
+                            <div style="font-size: 0.85rem; margin-top: 8px; color: #666;">
+                                <strong>🔧 Анализ кодов:</strong> ${example.relevance.codeDetails.details}
+                            </div>
+                        ` : ''}
+                        ${example.relevance.paramDetails && example.relevance.paramDetails.details.length > 0 ? `
+                            <div style="font-size: 0.85rem; margin-top: 8px; color: #666;">
+                                <strong>📊 Технические параметры (${example.relevance.paramDetails.score}/${example.relevance.paramDetails.maxScore}):</strong><br>
+                                ${example.relevance.paramDetails.details.join('<br>')}
+                            </div>
+                        ` : ''}
+                        ${example.relevance.typeDetails && example.relevance.typeDetails.details.length > 0 ? `
+                            <div style="font-size: 0.85rem; margin-top: 8px; color: #666;">
+                                <strong>🔧 Типы и конструкция (${example.relevance.typeDetails.score}/${example.relevance.typeDetails.maxScore}):</strong><br>
+                                ${example.relevance.typeDetails.details.join('<br>')}
+                            </div>
+                        ` : ''}
                     </div>
                 `).join('')}
             `;
 
-            // Страницы листинга
             const listingsContent = document.getElementById('listings-content');
             const listingExamples = getExamples(results.listings, 5);
             
@@ -1144,6 +1719,7 @@
                     <div class="example-item good">
                         <div class="query"><strong>Запрос:</strong> ${example.query}</div>
                         <div class="title"><strong>Заголовок:</strong> ${example.title}</div>
+                        <div class="reason" style="color: #38a169;"><strong>✅ Причина релевантности:</strong> ${example.relevance.reason}</div>
                     </div>
                 `).join('')}
                 
@@ -1152,12 +1728,11 @@
                     <div class="example-item bad">
                         <div class="query"><strong>Запрос:</strong> ${example.query}</div>
                         <div class="title"><strong>Заголовок:</strong> ${example.title}</div>
-                        <div class="reason"><strong>Проблема:</strong> ${example.relevance.reason}</div>
+                        <div class="reason"><strong>❌ Проблема:</strong> ${example.relevance.reason}</div>
                     </div>
                 `).join('')}
             `;
 
-            // Анализ проблем
             const problemsContent = document.getElementById('problems-content');
             const allProblems = { ...productStats.problems, ...listingStats.problems };
             
@@ -1168,18 +1743,26 @@
                         <div class="query"><strong>Проблема:</strong> ${problem}</div>
                         <div class="title"><strong>Количество случаев:</strong> ${count}</div>
                         <div style="color: #666; margin-top: 10px;">
-                            ${getProblemsolution(problem)}
+                            <strong>💡 Рекомендация:</strong> ${getProblemSolution(problem)}
                         </div>
                     </div>
                 `).join('')}
             `;
         }
 
-        function getProblemsolution(problem) {
+        function getProblemSolution(problem) {
             const solutions = {
                 'Не определен тип товара в запросе': 'Рекомендуется расширить семантическое ядро с конкретными типами товаров',
                 'Не определен тип товара в заголовке': 'Необходимо дополнить заголовки конкретными названиями товаров',
-                'Несоответствие типа товара': 'Проверьте соответствие landing page запросам пользователей'
+                'Несоответствие типа товара': 'Проверьте соответствие landing page запросам пользователей',
+                'Не найдено упоминание "задвижка"': 'Добавьте термин "задвижка" в заголовки или убедитесь в корректности классификации',
+                'Не найдено упоминание "кран"': 'Добавьте термин "кран" в заголовки или убедитесь в корректности классификации',
+                'Несоответствие технических кодов': 'Проверьте соответствие технических кодов задвижек в запросах и заголовках согласно ГОСТ',
+                'Низкое соответствие параметров': 'Убедитесь в соответствии диаметров, давлений и материалов между запросом и заголовком',
+                'Низкое соответствие': 'Улучшите соответствие технических характеристик и типов арматуры',
+                'Частичное соответствие': 'Добавьте дополнительные технические характеристики для повышения релевантности',
+                'Минимальное соответствие': 'Добавьте технические характеристики (ДУ, РУ, материал, тип) в заголовки для повышения релевантности',
+                'Недостаточно данных для анализа соответствия': 'Добавьте технические параметры и характеристики в запросы и заголовки'
             };
             return solutions[problem] || 'Требуется индивидуальный анализ';
         }
@@ -1218,13 +1801,17 @@
                 doc.text(`Категория: ${currentConfig.name}`, 20, 50);
                 doc.text(`Дата анализа: ${new Date().toLocaleDateString('ru-RU')}`, 20, 60);
                 
+                if (currentConfig.useValveCodes) {
+                    doc.text('Использована таблица фигур задвижек', 20, 70);
+                }
+                
                 const qualityElement = document.getElementById('qualityRating');
                 if (qualityElement) {
                     const qualityText = qualityElement.textContent.replace(/\s+/g, ' ').trim();
-                    doc.text(`Результат: ${qualityText}`, 20, 80);
+                    doc.text(`Результат: ${qualityText}`, 20, 90);
                 }
                 
-                doc.save(`relevance_analysis_${new Date().toISOString().split('T')[0]}.pdf`);
+                doc.save(`relevance_analysis_${currentConfig.name.toLowerCase()}_${new Date().toISOString().split('T')[0]}.pdf`);
                 showMessage('PDF-отчет экспортирован', 'success');
             } catch (error) {
                 showMessage(`Ошибка экспорта PDF: ${error.message}`, 'error');
